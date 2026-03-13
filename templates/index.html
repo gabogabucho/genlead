@@ -1,0 +1,837 @@
+<!DOCTYPE html>
+<html lang="es" x-data="app()" x-init="init()">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>LeadGen · Gabriel Urrutia</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <style>
+    [x-cloak]{display:none!important}
+    .chip { @apply text-xs font-medium px-2.5 py-0.5 rounded-full; }
+    ::-webkit-scrollbar{width:4px;height:4px}
+    ::-webkit-scrollbar-thumb{background:#cbd5e1;border-radius:2px}
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-800 h-screen flex flex-col overflow-hidden" @keydown.escape="selectedLead=null">
+
+<!-- ════════════════════ TOP NAV ════════════════════ -->
+<header class="bg-slate-900 text-white flex items-center justify-between px-5 py-2.5 shrink-0 z-20">
+  <div class="flex items-center gap-3">
+    <div class="w-7 h-7 rounded-lg bg-indigo-500 flex items-center justify-center font-bold text-xs">GU</div>
+    <span class="font-semibold">LeadGen</span>
+    <span class="text-slate-500 text-sm hidden sm:inline">Gabriel Urrutia</span>
+  </div>
+  <div class="flex items-center gap-2">
+    <!-- Badge follow-ups vencidos -->
+    <template x-if="stats.follow_ups?.length">
+      <button @click="filters.follow_up=!filters.follow_up; loadLeads()"
+              class="flex items-center gap-1.5 bg-red-500/20 hover:bg-red-500/30 text-red-300 text-xs px-3 py-1.5 rounded-full transition">
+        <span class="w-1.5 h-1.5 rounded-full bg-red-400 animate-pulse"></span>
+        <span x-text="stats.follow_ups.length + ' seguimiento' + (stats.follow_ups.length>1?'s':'') + ' vencido' + (stats.follow_ups.length>1?'s':'')"></span>
+      </button>
+    </template>
+    <!-- Revenue total -->
+    <div x-show="stats.totales?.revenue_total > 0"
+         class="text-xs text-emerald-400 font-semibold px-3 py-1.5 bg-emerald-500/10 rounded-full hidden sm:flex">
+      USD <span class="ml-1" x-text="(stats.totales?.revenue_total||0).toLocaleString()"></span>
+    </div>
+    <button @click="modalNuevoPipeline=true"
+            class="bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-medium px-3 py-1.5 rounded-lg transition">
+      + Pipeline
+    </button>
+  </div>
+</header>
+
+<!-- ════════════════════ LAYOUT ════════════════════ -->
+<div class="flex flex-1 overflow-hidden">
+
+  <!-- ── SIDEBAR ── -->
+  <aside class="w-52 bg-white border-r border-slate-100 flex flex-col shrink-0 overflow-y-auto">
+
+    <!-- KPIs -->
+    <div class="p-4 border-b border-slate-100 space-y-2">
+      <div class="grid grid-cols-2 gap-2">
+        <div class="bg-slate-50 rounded-xl p-2.5 text-center">
+          <p class="text-2xl font-bold" x-text="stats.totales?.total??'—'"></p>
+          <p class="text-xs text-slate-400 mt-0.5">Leads</p>
+        </div>
+        <div class="bg-emerald-50 rounded-xl p-2.5 text-center">
+          <p class="text-2xl font-bold text-emerald-600" x-text="stats.totales?.cerrados??'—'"></p>
+          <p class="text-xs text-slate-400 mt-0.5">Cerrados</p>
+        </div>
+        <div class="bg-purple-50 rounded-xl p-2.5 text-center">
+          <p class="text-2xl font-bold text-purple-600" x-text="stats.totales?.landings??'—'"></p>
+          <p class="text-xs text-slate-400 mt-0.5">Landings</p>
+        </div>
+        <div class="bg-teal-50 rounded-xl p-2.5 text-center">
+          <p class="text-2xl font-bold text-teal-600" x-text="stats.totales?.pagados??'—'"></p>
+          <p class="text-xs text-slate-400 mt-0.5">Pagados</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Status filter -->
+    <div class="p-3 border-b border-slate-100">
+      <p class="text-xs text-slate-400 uppercase font-semibold mb-2 px-1">Estado</p>
+      <template x-for="s in statusOptions" :key="s.value">
+        <button @click="setFilter('status', s.value)"
+                :class="filters.status===s.value?'bg-slate-100 font-semibold':'hover:bg-slate-50'"
+                class="w-full text-left text-sm px-2.5 py-1.5 rounded-lg flex items-center justify-between gap-2">
+          <div class="flex items-center gap-2 min-w-0">
+            <span :class="'w-2 h-2 rounded-full shrink-0 ' + s.dot"></span>
+            <span class="truncate" x-text="s.label"></span>
+          </div>
+          <span class="text-xs text-slate-400 shrink-0" x-text="countByStatus(s.value)||''"></span>
+        </button>
+      </template>
+    </div>
+
+    <!-- Tipo de servicio -->
+    <div class="p-3 border-b border-slate-100">
+      <p class="text-xs text-slate-400 uppercase font-semibold mb-2 px-1">Servicio</p>
+      <button @click="setFilter('tipo','')"
+              :class="!filters.tipo?'bg-slate-100 font-semibold':'hover:bg-slate-50'"
+              class="w-full text-left text-sm px-2.5 py-1.5 rounded-lg">Todos</button>
+      <button @click="setFilter('tipo','pro')"
+              :class="filters.tipo==='pro'?'bg-indigo-50 font-semibold text-indigo-700':'hover:bg-slate-50'"
+              class="w-full text-left text-sm px-2.5 py-1.5 rounded-lg flex items-center gap-2">
+        <span class="w-2 h-2 rounded-full bg-indigo-400"></span>
+        Mensual (Pro)
+        <span class="ml-auto text-xs text-slate-400" x-text="stats.totales?.tipo_pro||''"></span>
+      </button>
+      <button @click="setFilter('tipo','simple')"
+              :class="filters.tipo==='simple'?'bg-orange-50 font-semibold text-orange-700':'hover:bg-slate-50'"
+              class="w-full text-left text-sm px-2.5 py-1.5 rounded-lg flex items-center gap-2">
+        <span class="w-2 h-2 rounded-full bg-orange-400"></span>
+        Única (Simple)
+        <span class="ml-auto text-xs text-slate-400" x-text="stats.totales?.tipo_simple||''"></span>
+      </button>
+    </div>
+
+    <!-- Rubros -->
+    <div class="p-3">
+      <p class="text-xs text-slate-400 uppercase font-semibold mb-2 px-1">Rubros</p>
+      <button @click="setFilter('rubro','')"
+              :class="!filters.rubro?'bg-slate-100 font-semibold':'hover:bg-slate-50'"
+              class="w-full text-left text-sm px-2.5 py-1.5 rounded-lg">Todos</button>
+      <template x-for="r in rubros" :key="r.slug">
+        <button @click="setFilter('rubro', r.slug)"
+                :class="filters.rubro===r.slug?'bg-slate-100 font-semibold':'hover:bg-slate-50'"
+                class="w-full text-left text-sm px-2.5 py-1.5 rounded-lg flex justify-between">
+          <span class="truncate" x-text="r.nombre"></span>
+          <span class="text-xs text-slate-400 shrink-0" x-text="rubroCount(r.slug)||''"></span>
+        </button>
+      </template>
+    </div>
+  </aside>
+
+  <!-- ── MAIN ── -->
+  <main class="flex-1 overflow-y-auto flex flex-col min-w-0">
+
+    <!-- Search bar -->
+    <div class="sticky top-0 bg-slate-50/95 backdrop-blur border-b border-slate-200 px-5 py-2.5 flex items-center gap-3 z-10 shrink-0">
+      <input type="search" placeholder="Buscar empresa, ciudad, email…"
+             x-model.debounce.400ms="filters.q" @input="loadLeads()"
+             class="flex-1 bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"/>
+      <span class="text-xs text-slate-400 shrink-0" x-text="totalLeads + ' leads'"></span>
+    </div>
+
+    <!-- Rubro cards -->
+    <div class="px-5 pt-4 pb-3 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2.5">
+      <template x-for="r in stats.por_rubro" :key="r.slug">
+        <div @click="setFilter('rubro', r.slug)"
+             :class="filters.rubro===r.slug?'ring-2 ring-indigo-400 bg-indigo-50':'hover:shadow-sm bg-white'"
+             class="rounded-xl border border-slate-200 p-3 cursor-pointer transition">
+          <p class="text-xs text-slate-500 font-medium truncate" x-text="r.nombre"></p>
+          <p class="text-2xl font-bold mt-1" x-text="r.total||0"></p>
+          <div class="flex flex-wrap gap-x-2 mt-1.5 text-xs">
+            <span class="text-teal-600" x-text="'✉ '+(r.enviados||0)"></span>
+            <span class="text-emerald-600 font-medium" x-text="'✓ '+(r.cerrados||0)"></span>
+            <template x-if="r.revenue>0">
+              <span class="text-indigo-500" x-text="'$'+(r.revenue||0)"></span>
+            </template>
+          </div>
+        </div>
+      </template>
+    </div>
+
+    <!-- Lead table -->
+    <div class="px-5 pb-6 flex-1">
+      <div class="bg-white rounded-xl border border-slate-200 overflow-hidden">
+        <table class="w-full text-sm">
+          <thead>
+            <tr class="border-b border-slate-100 text-xs text-slate-400 uppercase">
+              <th class="text-left px-4 py-3">Empresa</th>
+              <th class="text-left px-4 py-3 hidden md:table-cell">Ciudad</th>
+              <th class="text-center px-4 py-3 hidden lg:table-cell">Score</th>
+              <th class="text-center px-4 py-3 hidden md:table-cell">Ads</th>
+              <th class="text-left px-4 py-3">Servicio</th>
+              <th class="text-left px-4 py-3">Estado</th>
+              <th class="text-right px-4 py-3">Acciones</th>
+            </tr>
+          </thead>
+          <tbody>
+            <template x-if="leads.length===0">
+              <tr><td colspan="7" class="text-center py-16 text-slate-400">
+                <div class="text-3xl mb-2">📭</div>
+                <div class="text-sm">No hay leads · iniciá un pipeline</div>
+              </td></tr>
+            </template>
+            <template x-for="lead in leads" :key="lead.id">
+              <tr @click="openLead(lead)"
+                  class="border-b border-slate-50 hover:bg-slate-50/80 cursor-pointer transition">
+                <td class="px-4 py-3">
+                  <div class="flex items-center gap-2">
+                    <div>
+                      <div class="font-medium leading-tight" x-text="lead.empresa"></div>
+                      <div x-show="lead.url" class="text-xs text-slate-400 truncate max-w-[150px]" x-text="lead.url"></div>
+                    </div>
+                    <!-- Badge follow-up vencido -->
+                    <template x-if="lead.follow_up_date && !lead.follow_up_done && lead.follow_up_date <= new Date().toISOString().slice(0,10)">
+                      <span title="Seguimiento vencido" class="w-2 h-2 rounded-full bg-red-400 shrink-0"></span>
+                    </template>
+                  </div>
+                </td>
+                <td class="px-4 py-3 text-slate-500 text-xs hidden md:table-cell" x-text="lead.ciudad"></td>
+                <td class="px-4 py-3 text-center hidden lg:table-cell">
+                  <span :class="scoreColor(lead.score_calidad)" class="font-semibold text-xs"
+                        x-text="lead.score_calidad+'/10'"></span>
+                </td>
+                <td class="px-4 py-3 text-center hidden md:table-cell">
+                  <span x-show="lead.google_ads_detectado"
+                        class="chip bg-green-100 text-green-700">Ads</span>
+                  <span x-show="!lead.google_ads_detectado" class="text-slate-200 text-xs">—</span>
+                </td>
+                <td class="px-4 py-3">
+                  <span :class="tipoClass(lead.tipo_servicio)"
+                        class="chip" x-text="tipoLabel(lead.tipo_servicio)"></span>
+                  <span x-show="!lead.tipo_confirmado && lead.tipo_servicio!=='ninguno'"
+                        class="text-xs text-slate-400 ml-1" title="Sugerido por IA, pendiente confirmación">?</span>
+                </td>
+                <td class="px-4 py-3">
+                  <span :class="statusClass(lead.status)"
+                        class="chip" x-text="statusLabel(lead.status)"></span>
+                </td>
+                <td class="px-4 py-3 text-right" @click.stop>
+                  <div class="flex justify-end gap-1">
+                    <template x-if="lead.status==='email_listo'">
+                      <button @click="aprobarEmail(lead)"
+                              class="text-xs bg-teal-600 hover:bg-teal-500 text-white px-2.5 py-1 rounded-lg transition">
+                        ✉ Enviar
+                      </button>
+                    </template>
+                    <template x-if="lead.status==='enviado'||lead.status==='pagado'">
+                      <button @click="marcarCerrado(lead)"
+                              class="text-xs bg-emerald-600 hover:bg-emerald-500 text-white px-2.5 py-1 rounded-lg transition">
+                        ✓ Cerrar
+                      </button>
+                    </template>
+                    <template x-if="lead.status==='pagado' && lead.tipo_servicio==='simple' && lead.dominio_status==='pendiente_compra'">
+                      <button @click="openLead(lead)"
+                              class="text-xs bg-indigo-600 hover:bg-indigo-500 text-white px-2.5 py-1 rounded-lg transition">
+                        🌐 Dominio
+                      </button>
+                    </template>
+                  </div>
+                </td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </main>
+</div>
+
+<!-- ════════════════════ PANEL DETALLE (slide-in derecho) ════════════════════ -->
+<div x-show="selectedLead" x-cloak
+     class="fixed inset-0 z-50 flex justify-end"
+     @click.self="selectedLead=null">
+  <div class="absolute inset-0 bg-black/30" @click="selectedLead=null"></div>
+  <div class="relative w-full max-w-xl bg-white h-full flex flex-col shadow-2xl overflow-hidden"
+       @click.stop x-show="selectedLead"
+       x-transition:enter="transition ease-out duration-200"
+       x-transition:enter-start="translate-x-full"
+       x-transition:enter-end="translate-x-0">
+
+    <!-- Header -->
+    <div class="flex items-start justify-between px-5 py-4 border-b border-slate-100 shrink-0">
+      <div class="min-w-0 flex-1">
+        <h2 class="font-semibold text-base truncate" x-text="selectedLead?.empresa"></h2>
+        <p class="text-xs text-slate-400 truncate"
+           x-text="[selectedLead?.ciudad, selectedLead?.rubro_slug].filter(Boolean).join(' · ')"></p>
+      </div>
+      <button @click="selectedLead=null" class="text-slate-400 hover:text-slate-600 ml-3 text-lg shrink-0">✕</button>
+    </div>
+
+    <!-- Tabs -->
+    <div class="flex border-b border-slate-100 shrink-0">
+      <template x-for="tab in ['info','email','dominio','timeline']" :key="tab">
+        <button @click="activeTab=tab"
+                :class="activeTab===tab?'border-b-2 border-indigo-500 text-indigo-600 font-medium':'text-slate-400 hover:text-slate-600'"
+                class="flex-1 py-2.5 text-xs capitalize transition">
+          <span x-text="{'info':'Análisis','email':'Email','dominio':'Dominio/Pago','timeline':'Timeline'}[tab]"></span>
+        </button>
+      </template>
+    </div>
+
+    <!-- Scrollable body -->
+    <div class="flex-1 overflow-y-auto px-5 py-4 space-y-5">
+
+      <!-- ── TAB: INFO ── -->
+      <div x-show="activeTab==='info'" class="space-y-4">
+
+        <!-- Estado + tipo -->
+        <div class="flex flex-wrap gap-2">
+          <span :class="statusClass(selectedLead?.status)" class="chip"
+                x-text="statusLabel(selectedLead?.status)"></span>
+          <span :class="tipoClass(selectedLead?.tipo_servicio)" class="chip"
+                x-text="tipoLabel(selectedLead?.tipo_servicio)"></span>
+          <template x-if="selectedLead?.google_ads_detectado">
+            <span class="chip bg-green-100 text-green-700">🎯 Google Ads</span>
+          </template>
+          <span class="chip" :class="scoreColor(selectedLead?.score_calidad)+' bg-slate-100'"
+                x-text="'Web score: '+(selectedLead?.score_calidad??'—')+'/10'"></span>
+        </div>
+
+        <!-- Tipo de servicio — confirmación -->
+        <div class="bg-amber-50 border border-amber-200 rounded-xl p-3"
+             x-show="!selectedLead?.tipo_confirmado && selectedLead?.tipo_servicio!=='ninguno'">
+          <p class="text-xs font-semibold text-amber-700 mb-2">
+            IA sugiere: <span x-text="tipoLabel(selectedLead?.tipo_servicio)"></span> — ¿confirmás?
+          </p>
+          <div class="flex gap-2">
+            <button @click="confirmarTipo('simple')"
+                    :class="selectedLead?.tipo_servicio==='simple'?'bg-orange-500 text-white':'bg-white border border-orange-300 text-orange-600 hover:bg-orange-50'"
+                    class="flex-1 text-xs py-1.5 rounded-lg font-medium transition">
+              Venta única
+            </button>
+            <button @click="confirmarTipo('pro')"
+                    :class="selectedLead?.tipo_servicio==='pro'?'bg-indigo-500 text-white':'bg-white border border-indigo-300 text-indigo-600 hover:bg-indigo-50'"
+                    class="flex-1 text-xs py-1.5 rounded-lg font-medium transition">
+              Mensual (Pro)
+            </button>
+          </div>
+        </div>
+
+        <!-- Datos de contacto -->
+        <div class="grid grid-cols-2 gap-3 text-sm">
+          <div>
+            <p class="text-xs text-slate-400 mb-0.5">Email</p>
+            <p class="font-medium truncate" x-text="selectedLead?.email||'—'"></p>
+          </div>
+          <div>
+            <p class="text-xs text-slate-400 mb-0.5">Teléfono</p>
+            <p class="font-medium" x-text="selectedLead?.telefono||'—'"></p>
+          </div>
+          <div>
+            <p class="text-xs text-slate-400 mb-0.5">Sitio web</p>
+            <a x-show="selectedLead?.url" :href="selectedLead?.url" target="_blank"
+               class="text-indigo-600 hover:underline truncate block text-xs" x-text="selectedLead?.url"></a>
+          </div>
+          <div>
+            <p class="text-xs text-slate-400 mb-0.5">Carga del sitio</p>
+            <p class="font-medium" x-text="selectedLead?.tiempo_respuesta?(selectedLead.tiempo_respuesta+'s'):'—'"></p>
+          </div>
+        </div>
+
+        <!-- Dolores -->
+        <template x-if="selectedLead?.dolores">
+          <div>
+            <p class="text-xs text-slate-400 uppercase font-semibold mb-2">Problemas detectados</p>
+            <div class="space-y-1.5">
+              <template x-for="d in (selectedLead?.dolores||'').split('|').filter(x=>x.trim())" :key="d">
+                <div class="text-xs bg-red-50 border border-red-100 rounded-lg px-3 py-2 text-red-700"
+                     x-text="d.trim()"></div>
+              </template>
+            </div>
+          </div>
+        </template>
+
+        <!-- Checks técnicos -->
+        <div>
+          <p class="text-xs text-slate-400 uppercase font-semibold mb-2">Checks técnicos</p>
+          <div class="grid grid-cols-3 gap-2 text-xs">
+            <template x-for="check in techChecks()" :key="check.label">
+              <div :class="check.ok?'bg-green-50 text-green-700':'bg-red-50 text-red-600'"
+                   class="rounded-lg px-2 py-2 text-center font-medium">
+                <span x-text="check.ok?'✓':'✕'"></span>
+                <span class="ml-1" x-text="check.label"></span>
+              </div>
+            </template>
+          </div>
+        </div>
+
+        <!-- CRM: Deal value + Follow-up -->
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <p class="text-xs text-slate-400 mb-1">Valor del deal (USD)</p>
+            <input type="number" :value="selectedLead?.deal_value||0"
+                   @change="updateField('deal_value', $event.target.valueAsNumber)"
+                   class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"/>
+          </div>
+          <div>
+            <p class="text-xs text-slate-400 mb-1">Seguimiento</p>
+            <input type="date" :value="selectedLead?.follow_up_date||''"
+                   @change="updateField('follow_up_date', $event.target.value)"
+                   class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"/>
+          </div>
+        </div>
+        <template x-if="selectedLead?.follow_up_date && !selectedLead?.follow_up_done">
+          <button @click="updateField('follow_up_done', 1)"
+                  class="text-xs text-slate-500 hover:text-emerald-600 underline">
+            ✓ Marcar seguimiento como hecho
+          </button>
+        </template>
+
+        <!-- Notas -->
+        <div>
+          <p class="text-xs text-slate-400 uppercase font-semibold mb-1.5">Notas</p>
+          <textarea x-model="editNotas" @change="updateField('notas', editNotas)"
+                    rows="3" placeholder="Agregar notas…"
+                    class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 resize-none"></textarea>
+        </div>
+      </div>
+
+      <!-- ── TAB: EMAIL ── -->
+      <div x-show="activeTab==='email'" class="space-y-4">
+        <template x-if="selectedLead?.email_html">
+          <div>
+            <div class="bg-slate-50 rounded-lg px-4 py-2.5 text-sm border border-slate-200 mb-3">
+              <span class="text-xs text-slate-400">Asunto:</span>
+              <span class="ml-2 font-medium" x-text="selectedLead?.email_asunto"></span>
+            </div>
+            <div class="border border-slate-200 rounded-xl overflow-hidden">
+              <iframe x-ref="emailFrame" class="w-full" style="height:460px" frameborder="0"></iframe>
+            </div>
+          </div>
+        </template>
+        <template x-if="!selectedLead?.email_html">
+          <div class="text-center py-12 text-slate-400">
+            <div class="text-3xl mb-2">✉️</div>
+            <p class="text-sm">Email no generado aún</p>
+            <p class="text-xs mt-1">Se genera automáticamente en el pipeline</p>
+          </div>
+        </template>
+      </div>
+
+      <!-- ── TAB: DOMINIO / PAGO ── -->
+      <div x-show="activeTab==='dominio'" class="space-y-4">
+
+        <!-- Estado de pago MP -->
+        <div>
+          <p class="text-xs text-slate-400 uppercase font-semibold mb-2">MercadoPago</p>
+          <div :class="{
+                'bg-yellow-50 border-yellow-200 text-yellow-700': selectedLead?.mp_payment_status==='pendiente'||!selectedLead?.mp_payment_status,
+                'bg-green-50 border-green-200 text-green-700': selectedLead?.mp_payment_status==='aprobado',
+                'bg-red-50 border-red-200 text-red-700': selectedLead?.mp_payment_status==='rechazado',
+               }"
+               class="border rounded-xl p-4">
+            <div class="flex items-center gap-3">
+              <span class="text-2xl">
+                <span x-show="selectedLead?.mp_payment_status==='aprobado'">💳</span>
+                <span x-show="selectedLead?.mp_payment_status!=='aprobado'">⏳</span>
+              </span>
+              <div>
+                <p class="font-semibold text-sm"
+                   x-text="{'pendiente':'Pago pendiente','aprobado':'¡Pago confirmado!','rechazado':'Pago rechazado','cancelado':'Pago cancelado'}[selectedLead?.mp_payment_status||'pendiente']||'Sin pago'">
+                </p>
+                <template x-if="selectedLead?.mp_fecha_pago">
+                  <p class="text-xs mt-0.5" x-text="'Fecha: '+selectedLead?.mp_fecha_pago?.slice(0,10)"></p>
+                </template>
+                <template x-if="selectedLead?.mp_monto">
+                  <p class="text-xs mt-0.5" x-text="'Monto: USD '+selectedLead?.mp_monto"></p>
+                </template>
+              </div>
+            </div>
+            <template x-if="selectedLead?.mp_payment_link">
+              <div class="mt-3 pt-3 border-t border-current/20">
+                <p class="text-xs mb-1 opacity-70">Link de pago generado:</p>
+                <a :href="selectedLead?.mp_payment_link" target="_blank"
+                   class="text-xs underline truncate block" x-text="selectedLead?.mp_payment_link"></a>
+              </div>
+            </template>
+          </div>
+        </div>
+
+        <!-- Flujo de dominio (solo para simple, después de pago) -->
+        <div x-show="selectedLead?.tipo_servicio==='simple'">
+          <p class="text-xs text-slate-400 uppercase font-semibold mb-2">Dominio</p>
+
+          <!-- Paso 1: Dominio sugerido -->
+          <div class="border border-slate-200 rounded-xl p-4 space-y-3">
+            <div class="flex items-start gap-3">
+              <div :class="selectedLead?.dominio_status!=='sin_asignar'&&selectedLead?.dominio_status?'bg-green-100 text-green-600':'bg-slate-100 text-slate-400'"
+                   class="w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold shrink-0 mt-0.5">1</div>
+              <div class="flex-1">
+                <p class="text-sm font-medium">Comprar en NIC.ar</p>
+                <template x-if="selectedLead?.dominio_sugerido">
+                  <p class="text-xs text-slate-500 mt-0.5">Dominio sugerido:
+                    <strong x-text="selectedLead?.dominio_sugerido"></strong>
+                  </p>
+                </template>
+                <a href="https://nic.ar" target="_blank"
+                   class="inline-block mt-2 text-xs bg-slate-800 hover:bg-slate-700 text-white px-3 py-1.5 rounded-lg transition">
+                  Ir a NIC.ar →
+                </a>
+              </div>
+            </div>
+
+            <hr class="border-slate-100"/>
+
+            <!-- Paso 2: Ingresar dominio comprado -->
+            <div class="flex items-start gap-3">
+              <div :class="['comprado','cf_configurado','live'].includes(selectedLead?.dominio_status)?'bg-green-100 text-green-600':'bg-slate-100 text-slate-400'"
+                   class="w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold shrink-0 mt-0.5">2</div>
+              <div class="flex-1">
+                <p class="text-sm font-medium">Confirmar dominio comprado</p>
+                <div class="flex gap-2 mt-2">
+                  <input type="text" x-model="dominioInput"
+                         :placeholder="selectedLead?.dominio_sugerido||'empresa.com.ar'"
+                         class="flex-1 border border-slate-200 rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-400"/>
+                  <button @click="confirmarDominio()"
+                          :disabled="!dominioInput"
+                          class="text-xs bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white px-3 py-1.5 rounded-lg transition">
+                    Confirmar
+                  </button>
+                </div>
+                <template x-if="selectedLead?.dominio_comprado">
+                  <p class="text-xs text-emerald-600 mt-1.5">✓ <span x-text="selectedLead?.dominio_comprado"></span></p>
+                </template>
+              </div>
+            </div>
+
+            <hr class="border-slate-100"/>
+
+            <!-- Paso 3: Cloudflare (automático) -->
+            <div class="flex items-start gap-3">
+              <div :class="['cf_configurado','live'].includes(selectedLead?.dominio_status)?'bg-green-100 text-green-600':'bg-slate-100 text-slate-400'"
+                   class="w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold shrink-0 mt-0.5">3</div>
+              <div class="flex-1">
+                <p class="text-sm font-medium">Configuración Cloudflare <span class="text-xs text-slate-400">(automático)</span></p>
+                <p class="text-xs text-slate-500 mt-0.5">DNS + SSL + Deploy de la landing</p>
+                <template x-if="selectedLead?.dominio_status==='cf_configurado'||selectedLead?.dominio_status==='live'">
+                  <p class="text-xs text-emerald-600 mt-1.5">✓ Configurado — disponible en fase B</p>
+                </template>
+                <template x-if="selectedLead?.landing_url_live">
+                  <a :href="selectedLead?.landing_url_live" target="_blank"
+                     class="inline-block mt-2 text-xs text-indigo-600 hover:underline"
+                     x-text="selectedLead?.landing_url_live"></a>
+                </template>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Nota para pro -->
+        <div x-show="selectedLead?.tipo_servicio==='pro'"
+             class="bg-indigo-50 border border-indigo-100 rounded-xl p-4 text-sm text-indigo-700">
+          <p class="font-medium mb-1">Servicio mensual (Pro)</p>
+          <p class="text-xs">Para este tipo de servicio se requiere tu participación directa para configurar las campañas de Ads y el onboarding del cliente.</p>
+        </div>
+      </div>
+
+      <!-- ── TAB: TIMELINE ── -->
+      <div x-show="activeTab==='timeline'" class="space-y-3">
+        <!-- Add activity -->
+        <div class="flex gap-2">
+          <input type="text" x-model="newActivity"
+                 placeholder="Agregar nota o actividad…"
+                 @keydown.enter="addActivity()"
+                 class="flex-1 border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"/>
+          <button @click="addActivity()"
+                  class="text-xs bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-1.5 rounded-lg transition shrink-0">
+            + Agregar
+          </button>
+        </div>
+
+        <!-- Activity list -->
+        <template x-if="activities.length===0">
+          <div class="text-center py-8 text-slate-400 text-sm">Sin actividades registradas</div>
+        </template>
+        <template x-for="act in activities" :key="act.id">
+          <div class="flex gap-3">
+            <div class="flex flex-col items-center shrink-0">
+              <div :class="activityDot(act.tipo)"
+                   class="w-7 h-7 rounded-full flex items-center justify-center text-sm shrink-0">
+                <span x-text="activityIcon(act.tipo)"></span>
+              </div>
+              <div class="w-px bg-slate-100 flex-1 mt-1"></div>
+            </div>
+            <div class="flex-1 pb-3">
+              <p class="text-sm" x-text="act.descripcion"></p>
+              <p class="text-xs text-slate-400 mt-0.5" x-text="act.created_at?.slice(0,16).replace('T',' ')"></p>
+            </div>
+          </div>
+        </template>
+      </div>
+
+    </div><!-- /scrollable body -->
+
+    <!-- Panel footer actions -->
+    <div class="px-5 py-3 border-t border-slate-100 flex gap-2 shrink-0 flex-wrap">
+      <template x-if="selectedLead?.status==='email_listo'">
+        <button @click="aprobarEmail(selectedLead)"
+                class="flex-1 bg-teal-600 hover:bg-teal-500 text-white text-xs font-semibold px-4 py-2 rounded-xl transition">
+          ✉ Aprobar y enviar email
+        </button>
+      </template>
+      <template x-if="selectedLead?.status==='enviado'||selectedLead?.status==='pagado'">
+        <button @click="marcarCerrado(selectedLead)"
+                class="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold px-4 py-2 rounded-xl transition">
+          ✓ Marcar cerrado
+        </button>
+      </template>
+      <template x-if="!['cerrado','descartado'].includes(selectedLead?.status||'')">
+        <button @click="descartarLead(selectedLead)"
+                class="bg-slate-100 hover:bg-red-50 hover:text-red-500 text-slate-500 text-xs px-4 py-2 rounded-xl transition">
+          Descartar
+        </button>
+      </template>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════════ MODAL: NUEVO PIPELINE ════════════════════ -->
+<div x-show="modalNuevoPipeline" x-cloak
+     class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center"
+     @click.self="modalNuevoPipeline=false">
+  <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 mx-4" @click.stop>
+    <h3 class="text-base font-semibold mb-4">Iniciar nuevo pipeline</h3>
+    <div class="space-y-3">
+      <div>
+        <label class="text-xs text-slate-500 font-medium block mb-1">Rubro</label>
+        <select x-model="nuevoPipeline.rubro"
+                class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400">
+          <option value="">Seleccioná un rubro…</option>
+          <template x-for="r in rubros" :key="r.slug">
+            <option :value="r.slug" x-text="r.nombre"></option>
+          </template>
+        </select>
+      </div>
+      <div>
+        <label class="text-xs text-slate-500 font-medium block mb-1">Ciudades (separadas por coma)</label>
+        <input type="text" x-model="nuevoPipeline.ciudades" placeholder="Buenos Aires, Córdoba"
+               class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"/>
+      </div>
+      <div>
+        <label class="text-xs text-slate-500 font-medium block mb-1">Límite de leads</label>
+        <input type="number" x-model.number="nuevoPipeline.limit" min="5" max="100"
+               class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"/>
+      </div>
+      <div class="bg-amber-50 border border-amber-100 rounded-xl p-3 text-xs text-amber-700">
+        El pipeline corre en el servidor — podés cerrar esta ventana y revisar los resultados después.
+      </div>
+    </div>
+    <div class="flex gap-2 mt-5">
+      <button @click="iniciarPipeline()" :disabled="!nuevoPipeline.rubro"
+              class="flex-1 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-sm font-semibold px-4 py-2.5 rounded-xl transition">
+        Iniciar
+      </button>
+      <button @click="modalNuevoPipeline=false"
+              class="bg-slate-100 text-slate-600 text-sm px-4 py-2.5 rounded-xl hover:bg-slate-200 transition">
+        Cancelar
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════════ ALPINE APP ════════════════════ -->
+<script>
+function app() {
+  return {
+    leads: [], rubros: [], stats: {totales:{}, por_status:[], por_rubro:[], follow_ups:[]},
+    totalLeads: 0, activities: [],
+    selectedLead: null, activeTab: 'info',
+    editNotas: '', newActivity: '', dominioInput: '',
+    modalNuevoPipeline: false,
+    nuevoPipeline: { rubro:'', ciudades:'Buenos Aires', limit:30 },
+    filters: { rubro:'', status:'', tipo:'', q:'', follow_up:false },
+
+    statusOptions: [
+      {value:'',              label:'Todos',           dot:'bg-slate-300'},
+      {value:'nuevo',         label:'Nuevo',           dot:'bg-slate-400'},
+      {value:'analizado',     label:'Analizado',       dot:'bg-blue-400'},
+      {value:'landing_lista', label:'Landing lista',   dot:'bg-purple-400'},
+      {value:'email_listo',   label:'Email listo',     dot:'bg-yellow-400'},
+      {value:'enviado',       label:'Enviado',         dot:'bg-teal-400'},
+      {value:'pagado',        label:'Pagado 💳',       dot:'bg-emerald-400'},
+      {value:'en_proceso',    label:'En proceso',      dot:'bg-indigo-400'},
+      {value:'cerrado',       label:'Cerrado 🎉',      dot:'bg-green-500'},
+      {value:'descartado',    label:'Descartado',      dot:'bg-red-300'},
+    ],
+
+    async init() {
+      await Promise.all([this.loadStats(), this.loadRubros(), this.loadLeads()]);
+      setInterval(() => this.loadStats(), 30000);
+    },
+    async loadStats() {
+      this.stats = await fetch('/api/stats').then(r=>r.json());
+    },
+    async loadRubros() {
+      this.rubros = await fetch('/api/rubros').then(r=>r.json());
+    },
+    async loadLeads() {
+      const p = new URLSearchParams();
+      if (this.filters.rubro)    p.set('rubro',  this.filters.rubro);
+      if (this.filters.status)   p.set('status', this.filters.status);
+      if (this.filters.tipo)     p.set('tipo',   this.filters.tipo);
+      if (this.filters.q)        p.set('q',      this.filters.q);
+      if (this.filters.follow_up) p.set('follow_up_vencido','1');
+      const d = await fetch('/api/leads?'+p).then(r=>r.json());
+      this.leads = d.leads; this.totalLeads = d.total;
+    },
+    setFilter(key, val) {
+      this.filters[key] = (this.filters[key]===val && key!=='q') ? '' : val;
+      this.loadLeads();
+    },
+    async openLead(lead) {
+      this.selectedLead = lead;
+      this.editNotas  = lead.notas || '';
+      this.activeTab  = 'info';
+      this.dominioInput = lead.dominio_sugerido || '';
+      this.activities = await fetch(`/api/leads/${lead.id}/activities`).then(r=>r.json());
+      this.$nextTick(() => {
+        if (lead.email_html && this.$refs.emailFrame) {
+          const d = this.$refs.emailFrame.contentDocument;
+          d.open(); d.write(lead.email_html); d.close();
+        }
+      });
+    },
+    async updateField(field, value) {
+      if (!this.selectedLead) return;
+      await fetch(`/api/leads/${this.selectedLead.id}`, {
+        method:'PATCH',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({[field]: value}),
+      });
+      this.selectedLead[field] = value;
+      await this.loadStats();
+    },
+    async confirmarTipo(tipo) {
+      await fetch(`/api/leads/${this.selectedLead.id}`, {
+        method:'PATCH',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({tipo_servicio:tipo, tipo_confirmado:1}),
+      });
+      this.selectedLead.tipo_servicio  = tipo;
+      this.selectedLead.tipo_confirmado = 1;
+      const lead = this.leads.find(l=>l.id===this.selectedLead.id);
+      if (lead) { lead.tipo_servicio = tipo; lead.tipo_confirmado = 1; }
+    },
+    async aprobarEmail(lead) {
+      if (!confirm(`¿Enviás el email a ${lead.empresa}?`)) return;
+      await this.patchLead(lead, {status:'enviado'});
+      await this.addActivityFor(lead.id, 'email_enviado', 'Email aprobado y enviado');
+    },
+    async marcarCerrado(lead) {
+      await this.patchLead(lead, {status:'cerrado'});
+      await this.addActivityFor(lead.id, 'cierre', 'Deal cerrado 🎉');
+      await this.loadStats();
+    },
+    async descartarLead(lead) {
+      await this.patchLead(lead, {status:'descartado'});
+      if (this.selectedLead?.id===lead.id) this.selectedLead=null;
+    },
+    async patchLead(lead, data) {
+      await fetch(`/api/leads/${lead.id}`, {
+        method:'PATCH', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify(data),
+      });
+      Object.assign(lead, data);
+      if (this.selectedLead?.id===lead.id) Object.assign(this.selectedLead, data);
+      await this.loadStats();
+    },
+    async addActivity() {
+      if (!this.newActivity.trim() || !this.selectedLead) return;
+      await this.addActivityFor(this.selectedLead.id, 'nota', this.newActivity);
+      this.newActivity = '';
+    },
+    async addActivityFor(leadId, tipo, desc) {
+      await fetch(`/api/leads/${leadId}/activities`, {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({tipo, descripcion: desc}),
+      });
+      if (this.selectedLead?.id === leadId) {
+        this.activities = await fetch(`/api/leads/${leadId}/activities`).then(r=>r.json());
+      }
+    },
+    async confirmarDominio() {
+      if (!this.dominioInput || !this.selectedLead) return;
+      const r = await fetch(`/api/leads/${this.selectedLead.id}/dominio`, {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({dominio: this.dominioInput}),
+      });
+      const d = await r.json();
+      if (d.ok) {
+        this.selectedLead.dominio_comprado = this.dominioInput;
+        this.selectedLead.dominio_status   = 'comprado';
+        this.activities = await fetch(`/api/leads/${this.selectedLead.id}/activities`).then(r=>r.json());
+        alert(`✓ Dominio ${this.dominioInput} registrado. Cloudflare se configurará automáticamente (Fase B).`);
+      }
+    },
+    async iniciarPipeline() {
+      alert('Pipeline iniciado en el servidor.');
+      this.modalNuevoPipeline = false;
+      // TODO Fase A: POST al servicio CrewAI
+    },
+
+    // ── Helpers ──
+    countByStatus(s) {
+      if (!s) return this.stats.totales?.total ?? '';
+      return this.stats.por_status?.find(x=>x.status===s)?.count ?? '';
+    },
+    rubroCount(slug) {
+      return this.stats.por_rubro?.find(x=>x.slug===slug)?.total ?? '';
+    },
+    statusLabel(s) {
+      return {nuevo:'Nuevo',analizado:'Analizado',landing_lista:'Landing lista',
+              email_listo:'Email listo',enviado:'Enviado',pagado:'Pagado',
+              en_proceso:'En proceso',cerrado:'Cerrado',descartado:'Descartado'}[s]??s;
+    },
+    statusClass(s) {
+      return {nuevo:'bg-slate-100 text-slate-600',analizado:'bg-blue-100 text-blue-700',
+              landing_lista:'bg-purple-100 text-purple-700',email_listo:'bg-yellow-100 text-yellow-700',
+              enviado:'bg-teal-100 text-teal-700',pagado:'bg-emerald-100 text-emerald-700',
+              en_proceso:'bg-indigo-100 text-indigo-700',cerrado:'bg-green-100 text-green-700',
+              descartado:'bg-red-100 text-red-400'}[s]??'bg-slate-100 text-slate-500';
+    },
+    tipoLabel(t) {
+      return {pro:'Mensual',simple:'Venta única',ninguno:'Sin clasificar'}[t]??t;
+    },
+    tipoClass(t) {
+      return {pro:'bg-indigo-100 text-indigo-700',simple:'bg-orange-100 text-orange-700',
+              ninguno:'bg-slate-100 text-slate-400'}[t]??'bg-slate-100 text-slate-400';
+    },
+    scoreColor(s) {
+      if (s>=8) return 'text-green-600';
+      if (s>=5) return 'text-amber-500';
+      return 'text-red-500';
+    },
+    techChecks() {
+      const l = this.selectedLead;
+      if (!l) return [];
+      return [
+        {label:'HTTPS',      ok: l.ssl},
+        {label:'Mobile',     ok: l.mobile_viewport},
+        {label:'WhatsApp',   ok: l.tiene_whatsapp},
+        {label:'Formulario', ok: l.tiene_formulario},
+        {label:'GA4',        ok: l.google_analytics},
+        {label:'Meta Ads',   ok: l.meta_ads_detectado},
+      ];
+    },
+    activityIcon(tipo) {
+      return {nota:'📝',email_enviado:'✉️',llamada:'📞',reunion:'🤝',
+              pago_recibido:'💳',dominio_comprado:'🌐',cf_configurado:'⚡',
+              seguimiento:'🔔',cierre:'🎉'}[tipo]??'•';
+    },
+    activityDot(tipo) {
+      return {pago_recibido:'bg-emerald-100',cierre:'bg-green-100',
+              email_enviado:'bg-teal-100',dominio_comprado:'bg-indigo-100'}[tipo]??'bg-slate-100';
+    },
+  };
+}
+</script>
+</body>
+</html>
