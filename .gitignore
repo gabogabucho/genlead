@@ -1,8 +1,46 @@
-*.db
-*.db-journal
-*.db-shm
-*.db-wal
-__pycache__/
-*.pyc
+# Secretos — NUNCA subir
 .env
+.env.*
+!.env.example
+
+# Base de datos
+*.db
+*.db-wal
+*.db-shm
+*.db-journal
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+venv/
+.venv/
+env/
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+
+# Leads y exports (datos scrapeados, no van al repo)
+leads/
+exports/
+
+# Logs
 *.log
+logs/
+
+# Claude settings locales
+.claude/settings.local.json
+
+# Archivos temporales
+_tmp_*.py
+*.tmp
+*.bak
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
